@@ -91,6 +91,58 @@ func TestSafety(t *testing.T) {
 	}
 }
 
+func TestSchemaAndInputValidation(t *testing.T) {
+	schema := map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"order_id": map[string]any{"type": "string"}, "qty": map[string]any{"type": "integer"}},
+		"required":   []any{"order_id"},
+	}
+	if ok, _ := ValidateSchema(map[string]any{"order_id": "A1", "qty": 2.0}, schema, "input"); !ok {
+		t.Error("valid input should pass")
+	}
+	if ok, _ := ValidateSchema(map[string]any{"qty": 2.0}, schema, "input"); ok {
+		t.Error("missing required should fail")
+	}
+	if ok, _ := ValidateSchema(map[string]any{"order_id": 5.0}, schema, "input"); ok {
+		t.Error("wrong type should fail")
+	}
+	if ok, _ := ValidateSchema(map[string]any{"order_id": "A1", "qty": 1.5}, schema, "input"); ok {
+		t.Error("non-integer should fail")
+	}
+	if ok, _ := ValidateSchema(map[string]any{"anything": 1}, map[string]any{}, "input"); !ok {
+		t.Error("empty schema should accept anything")
+	}
+
+	man := Manifest{
+		"protocol": "ai2w",
+		"actions": []any{map[string]any{
+			"name":         "track_order",
+			"endpoint":     "/ai2w/actions/track-order",
+			"input_schema": schema,
+		}},
+	}
+	acts := map[string]Handler{"track_order": func(b any) any { return map[string]any{"ok": true} }}
+
+	ok := Handle(ServerOptions{Manifest: man, Actions: acts}, "POST", "/ai2w/actions/track-order", map[string]any{"order_id": "A1"}, "")
+	if ok.Status != 200 {
+		t.Errorf("valid body: status %d", ok.Status)
+	}
+	bad := Handle(ServerOptions{Manifest: man, Actions: acts}, "POST", "/ai2w/actions/track-order", map[string]any{}, "")
+	if bad.Status != 400 {
+		t.Errorf("missing required: expected 400, got %d", bad.Status)
+	}
+	if b, _ := bad.Body.(map[string]any); b != nil {
+		if e, _ := b["error"].(map[string]any); e == nil || e["code"] != "invalid_request" {
+			t.Errorf("expected invalid_request error, got %v", bad.Body)
+		}
+	}
+	off := false
+	skip := Handle(ServerOptions{Manifest: man, Actions: acts, ValidateInput: &off}, "POST", "/ai2w/actions/track-order", map[string]any{}, "")
+	if skip.Status != 200 {
+		t.Errorf("validate-input opt-out: expected 200, got %d", skip.Status)
+	}
+}
+
 func TestConformance(t *testing.T) {
 	data, err := os.ReadFile("testdata/conformance_cases.json")
 	if err != nil {

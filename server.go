@@ -20,6 +20,10 @@ type ServerOptions struct {
 	Manifest Manifest
 	Modules  map[string]Handler
 	Actions  map[string]Handler
+	// ValidateInput validates each action's request body against its declared input_schema
+	// before the handler runs (returns 400 invalid_request on mismatch). Defaults to on;
+	// set to a pointer to false to opt out.
+	ValidateInput *bool
 }
 
 var corsHeaders = map[string]string{
@@ -82,10 +86,22 @@ func Handle(opts ServerOptions, method, path string, body any, origin string) Re
 	}
 	if mm := actionRe.FindStringSubmatch(path); mm != nil {
 		name := strings.ReplaceAll(mm[1], "-", "_")
-		if fn, ok := opts.Actions[name]; ok {
-			return jsonResp(200, fn(body))
+		fn, ok := opts.Actions[name]
+		if !ok {
+			return errResp(404, "unsupported_capability", "Unknown action '"+name+"'.")
 		}
-		return errResp(404, "unsupported_capability", "Unknown action '"+name+"'.")
+		if opts.ValidateInput == nil || *opts.ValidateInput {
+			if schema := actionInputSchema(opts.Manifest, name); schema != nil {
+				b := body
+				if b == nil {
+					b = map[string]any{}
+				}
+				if valid, errs := ValidateSchema(b, schema, "input"); !valid {
+					return errResp(400, "invalid_request", "Request does not match the declared input schema: "+strings.Join(errs, "; ")+".")
+				}
+			}
+		}
+		return jsonResp(200, fn(body))
 	}
 	if mm := moduleRe.FindStringSubmatch(path); mm != nil {
 		name := mm[1]
