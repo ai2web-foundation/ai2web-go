@@ -1,8 +1,13 @@
 # AI2Web Go SDK (`github.com/ai2web-foundation/ai2web-go`)
 
 [![CI](https://github.com/ai2web-foundation/ai2web-go/actions/workflows/ci.yml/badge.svg)](https://github.com/ai2web-foundation/ai2web-go/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ai2web-foundation/ai2web-go.svg)](https://pkg.go.dev/github.com/ai2web-foundation/ai2web-go)
 
 The Go reference implementation of the [AI2Web protocol](https://github.com/ai2web-foundation/ai2web-spec). Mirrors `@ai2web/core`.
+
+```bash
+go get github.com/ai2web-foundation/ai2web-go
+```
 
 ```go
 package main
