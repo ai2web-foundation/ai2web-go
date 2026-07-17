@@ -3,6 +3,7 @@ package ai2web
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -140,6 +141,130 @@ func TestSchemaAndInputValidation(t *testing.T) {
 	skip := Handle(ServerOptions{Manifest: man, Actions: acts, ValidateInput: &off}, "POST", "/ai2w/actions/track-order", map[string]any{}, "")
 	if skip.Status != 200 {
 		t.Errorf("validate-input opt-out: expected 200, got %d", skip.Status)
+	}
+}
+
+func TestV02AndExport(t *testing.T) {
+	m := ForSite("Example Bistro", "https://bistro.example", "restaurant").
+		Capability("content", nil).
+		Capability("commerce", map[string]any{"endpoint": "/ai2w/products"}).
+		Capability("search", map[string]any{"endpoint": "/ai2w/search"}).
+		Action(map[string]any{
+			"name": "book_table", "description": "Reserve a table.", "method": "POST",
+			"endpoint": "/ai2w/actions/book-table", "requires_auth": false, "requires_user_approval": true,
+			"risk": "medium", "intent": "reserve_table",
+			"bindings": []any{
+				map[string]any{"kind": "mcp", "ref": "book_table", "priority": 1},
+				map[string]any{"kind": "redirect", "ref": "/reserve", "priority": 9, "fallback_only": true},
+			},
+		}).
+		Knowledge([]any{map[string]any{"id": "menu", "name": "Menu", "kind": "catalog", "ref": "/ai2w/products", "format": "json"}}).
+		Governance(map[string]any{"rate_limits": map[string]any{"requests": 60, "window_seconds": 60}, "consent_mode": map[string]any{"book_table": "explicit"}}).
+		UsagePolicy(map[string]any{"bulk_extraction": false, "model_training": false}).
+		Legal(map[string]any{"jurisdiction": "EU", "ai_transparency": true, "ai_risk_classification": "limited"}).
+		AgentIdentity(map[string]any{"required": false, "allow_anonymous": true, "methods": []any{"http_message_signatures"}}).
+		Contact(map[string]any{"support": "hi@bistro.example"}).
+		Build()
+
+	if m["version"] != "0.2" {
+		t.Errorf("version = %v", m["version"])
+	}
+	if m["governance"].(map[string]any)["rate_limits"].(map[string]any)["requests"] != 60 {
+		t.Errorf("governance requests = %v", m["governance"])
+	}
+	if m["usage_policy"].(map[string]any)["model_training"] != false {
+		t.Errorf("usage_policy = %v", m["usage_policy"])
+	}
+	if m["legal"].(map[string]any)["ai_risk_classification"] != "limited" {
+		t.Errorf("legal = %v", m["legal"])
+	}
+	if m["identity"].(map[string]any)["agent"].(map[string]any)["methods"].([]any)[0] != "http_message_signatures" {
+		t.Errorf("agent identity = %v", m["identity"])
+	}
+	if m["knowledge"].([]any)[0].(map[string]any)["id"] != "menu" {
+		t.Errorf("knowledge = %v", m["knowledge"])
+	}
+	a0 := m["actions"].([]any)[0].(map[string]any)
+	if a0["intent"] != "reserve_table" {
+		t.Errorf("intent = %v", a0["intent"])
+	}
+	if len(a0["bindings"].([]any)) != 2 {
+		t.Errorf("bindings = %v", a0["bindings"])
+	}
+	if a0["bindings"].([]any)[1].(map[string]any)["fallback_only"] != true {
+		t.Errorf("fallback_only = %v", a0["bindings"])
+	}
+
+	txt := ToLlmsTxt(m)
+	if !strings.HasPrefix(txt, "# Example Bistro") {
+		t.Errorf("llms.txt title: %q", txt)
+	}
+	for _, want := range []string{"## Capabilities", "- commerce", "## Knowledge", "Menu", "book_table: Reserve a table.", "https://bistro.example/ai2w"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("llms.txt missing %q", want)
+		}
+	}
+
+	aj := ToAgentJSON(m)
+	if aj["name"] != "Example Bistro" {
+		t.Errorf("agent.json name = %v", aj["name"])
+	}
+	if !slices.Contains(aj["capabilities"].([]string), "commerce") {
+		t.Errorf("agent.json capabilities = %v", aj["capabilities"])
+	}
+	aja0 := aj["actions"].([]any)[0].(map[string]any)
+	if aja0["intent"] != "reserve_table" {
+		t.Errorf("agent.json intent = %v", aja0["intent"])
+	}
+	if len(aja0["bindings"].([]any)) != 2 {
+		t.Errorf("agent.json bindings = %v", aja0["bindings"])
+	}
+	if aj["policies"].(map[string]any)["legal"].(map[string]any)["jurisdiction"] != "EU" {
+		t.Errorf("agent.json legal = %v", aj["policies"])
+	}
+	if aj["policies"].(map[string]any)["governance"].(map[string]any)["consent_mode"].(map[string]any)["book_table"] != "explicit" {
+		t.Errorf("agent.json governance = %v", aj["policies"])
+	}
+
+	// action without explicit bindings falls back to a rest binding on its endpoint
+	aj2 := ToAgentJSON(ForSite("X", "https://x.example", "site").
+		Action(map[string]any{"name": "a", "description": "d", "method": "POST", "endpoint": "/ai2w/actions/a", "requires_auth": false, "requires_user_approval": false, "risk": "low"}).
+		Build())
+	if aj2["actions"].([]any)[0].(map[string]any)["bindings"].([]any)[0].(map[string]any)["kind"] != "rest" {
+		t.Errorf("default binding = %v", aj2["actions"])
+	}
+}
+
+func TestMultiSurface(t *testing.T) {
+	m := ForSite("Bistro", "https://bistro.example", "restaurant").
+		Capability("content", nil).
+		Capability("commerce", map[string]any{"endpoint": "/ai2w/products"}).
+		Governance(map[string]any{"rate_limits": map[string]any{"requests": 60}}).
+		Build()
+
+	llms := Handle(ServerOptions{Manifest: m}, "GET", "/llms.txt", nil, "")
+	if llms.Status != 200 {
+		t.Fatalf("llms.txt status %d", llms.Status)
+	}
+	if ct := llms.Headers["content-type"]; !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("llms.txt content-type %q", ct)
+	}
+	if s, _ := llms.Body.(string); !strings.HasPrefix(s, "# Bistro") {
+		t.Errorf("llms.txt body %v", llms.Body)
+	}
+
+	aj := Handle(ServerOptions{Manifest: m}, "GET", "/.well-known/agent.json", nil, "")
+	if aj.Status != 200 {
+		t.Fatalf("agent.json status %d", aj.Status)
+	}
+	if b, _ := aj.Body.(map[string]any); b["name"] != "Bistro" {
+		t.Errorf("agent.json name %v", aj.Body)
+	}
+	if a2 := Handle(ServerOptions{Manifest: m}, "GET", "/agent.json", nil, ""); a2.Status != 200 {
+		t.Errorf("agent.json alias status %d", a2.Status)
+	}
+	if post := Handle(ServerOptions{Manifest: m}, "POST", "/llms.txt", nil, ""); post.Status != 405 {
+		t.Errorf("llms.txt POST expected 405, got %d", post.Status)
 	}
 }
 

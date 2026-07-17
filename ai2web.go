@@ -61,7 +61,7 @@ type Builder struct{ m Manifest }
 
 // New starts a builder for a site.
 func New(site map[string]any) *Builder {
-	return &Builder{m: Manifest{"protocol": "ai2w", "version": "0.1", "site": site, "capabilities": map[string]any{}}}
+	return &Builder{m: Manifest{"protocol": "ai2w", "version": "0.2", "site": site, "capabilities": map[string]any{}}}
 }
 
 // ForSite is a convenience over New.
@@ -117,6 +117,22 @@ func (b *Builder) Events(e map[string]any) *Builder {
 }
 
 func (b *Builder) AgentService(s map[string]any) *Builder { b.m["agent_service"] = s; return b }
+
+// v0.2 optional modules (all additive; a minimal manifest stays valid without them).
+func (b *Builder) Governance(g map[string]any) *Builder  { b.m["governance"] = g; return b }
+func (b *Builder) UsagePolicy(u map[string]any) *Builder { b.m["usage_policy"] = u; return b }
+func (b *Builder) Legal(l map[string]any) *Builder       { b.m["legal"] = l; return b }
+func (b *Builder) Knowledge(k []any) *Builder            { b.m["knowledge"] = k; return b }
+
+func (b *Builder) AgentIdentity(a map[string]any) *Builder {
+	id, _ := b.m["identity"].(map[string]any)
+	if id == nil {
+		id = map[string]any{}
+	}
+	id["agent"] = a
+	b.m["identity"] = id
+	return b
+}
 
 func (b *Builder) Build() Manifest { return b.m }
 

@@ -47,6 +47,14 @@ func errResp(status int, code, message string) Response {
 	return jsonResp(status, map[string]any{"error": map[string]any{"code": code, "message": message, "retryable": false}})
 }
 
+func textResp(status int, contentType, body string) Response {
+	h := map[string]string{"content-type": contentType}
+	for k, v := range corsHeaders {
+		h[k] = v
+	}
+	return Response{Status: status, Headers: h, Body: body}
+}
+
 // Handle serves an AI2Web request: manifest, well-known anchor, negotiation, and module/action dispatch.
 func Handle(opts ServerOptions, method, path string, body any, origin string) Response {
 	if p := strings.Trim(path, "/"); p == "" {
@@ -70,6 +78,20 @@ func Handle(opts ServerOptions, method, path string, body any, origin string) Re
 			return errResp(405, "invalid_request", "Use GET for the manifest.")
 		}
 		return jsonResp(200, opts.Manifest)
+	}
+	// Multi-surface projections (RFC-0015): the one canonical manifest, emitted in other
+	// discovery formats so agents that speak llms.txt or agent.json need not parse ai2w first.
+	if path == "/llms.txt" {
+		if method != "GET" {
+			return errResp(405, "invalid_request", "Use GET for llms.txt.")
+		}
+		return textResp(200, "text/plain; charset=utf-8", ToLlmsTxt(opts.Manifest))
+	}
+	if path == "/.well-known/agent.json" || path == "/agent.json" {
+		if method != "GET" {
+			return errResp(405, "invalid_request", "Use GET for agent.json.")
+		}
+		return jsonResp(200, ToAgentJSON(opts.Manifest))
 	}
 	if path == "/ai2w/negotiate" {
 		supports := map[string]any{}
