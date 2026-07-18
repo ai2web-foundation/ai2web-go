@@ -166,6 +166,17 @@ func IsSafePublicURL(raw string) bool {
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return false
 	}
+	// Alternative IPv4 encodings that net.ParseIP rejects but a libc/getaddrinfo resolver
+	// (cgo builds) may still resolve to a private address: hex (0x7f000001 / 0x7f.0.0.1),
+	// decimal integer (2130706433), octal, and short forms (127.1).
+	for _, label := range strings.Split(host, ".") {
+		if strings.HasPrefix(label, "0x") {
+			return false
+		}
+	}
+	if !strings.ContainsAny(host, "abcdefghijklmnopqrstuvwxyz") {
+		return false // all-numeric host that net.ParseIP did not accept as a real address
+	}
 	return true
 }
 
