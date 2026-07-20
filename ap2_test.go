@@ -44,6 +44,11 @@ func TestAP2(t *testing.T) {
 		t.Fatal("transport: no extension uri")
 	}
 
+	golden := map[string]any{"z": "a/b", "currency": "GBP", "n": 10.0, "items": []any{map[string]any{"value": 9.99, "label": "Mug"}}, "ok": true}
+	if got := string(ap2Canonical(golden)); got != `{"currency":"GBP","items":[{"label":"Mug","value":9.99}],"n":10,"ok":true,"z":"a/b"}` {
+		t.Fatalf("JCS canonical cross-SDK: %s", got)
+	}
+
 	intent := AP2IntentMandate("a red basketball shoe", AP2IntentOptions{Skus: []string{"SHOE-1"}, Now: 1000})
 	if intent["natural_language_description"] != "a red basketball shoe" || intent["intent_expiry"] == "" {
 		t.Fatalf("intent: %v", intent)

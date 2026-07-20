@@ -11,7 +11,6 @@ package ai2web
 // library (crypto/rsa), so the SDK keeps zero third-party dependencies.
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -24,6 +23,8 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -311,12 +312,110 @@ func AP2PaymentDetails(paymentMandate map[string]any) map[string]any {
 
 // --- helpers ---
 
+// ap2Canonical is JCS (RFC 8785) canonicalisation, so a cart_hash is byte-identical across every
+// SDK: object keys sorted, no whitespace, minimal string escaping, integers without a decimal
+// point, currency amounts as a short decimal.
 func ap2Canonical(v any) []byte {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(v)
-	return bytes.TrimRight(buf.Bytes(), "\n")
+	var b strings.Builder
+	ap2Jcs(&b, v)
+	return []byte(b.String())
+}
+
+func ap2Jcs(b *strings.Builder, v any) {
+	switch x := v.(type) {
+	case nil:
+		b.WriteString("null")
+	case bool:
+		if x {
+			b.WriteString("true")
+		} else {
+			b.WriteString("false")
+		}
+	case string:
+		ap2JcsString(b, x)
+	case float64:
+		b.WriteString(ap2JcsNumber(x))
+	case float32:
+		b.WriteString(ap2JcsNumber(float64(x)))
+	case int:
+		b.WriteString(strconv.Itoa(x))
+	case int64:
+		b.WriteString(strconv.FormatInt(x, 10))
+	case []any:
+		b.WriteByte('[')
+		for i, e := range x {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			ap2Jcs(b, e)
+		}
+		b.WriteByte(']')
+	case []string:
+		b.WriteByte('[')
+		for i, e := range x {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			ap2JcsString(b, e)
+		}
+		b.WriteByte(']')
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		b.WriteByte('{')
+		for i, k := range keys {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			ap2JcsString(b, k)
+			b.WriteByte(':')
+			ap2Jcs(b, x[k])
+		}
+		b.WriteByte('}')
+	default:
+		b.WriteString("null")
+	}
+}
+
+func ap2JcsNumber(x float64) string {
+	if x == math.Trunc(x) && math.Abs(x) < 1e15 {
+		return strconv.FormatInt(int64(x), 10)
+	}
+	s := strconv.FormatFloat(x, 'f', 2, 64)
+	s = strings.TrimRight(s, "0")
+	return strings.TrimRight(s, ".")
+}
+
+func ap2JcsString(b *strings.Builder, s string) {
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			if r < 0x20 {
+				fmt.Fprintf(b, `\u%04x`, r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	b.WriteByte('"')
 }
 
 func ap2B64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
