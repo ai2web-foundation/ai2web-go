@@ -9,6 +9,8 @@
 
 # AI2Web Go SDK (`github.com/ai2web-foundation/ai2web-go`)
 
+[![AI2Web on Launchpadly - Product of the Week (Gold)](https://launchpadly.co/embed/badges/startup/ai2web.svg?variant=product-week-gold)](https://launchpadly.co/startup/ai2web?ref=badge)
+
 [![CI](https://github.com/ai2web-foundation/ai2web-go/actions/workflows/ci.yml/badge.svg)](https://github.com/ai2web-foundation/ai2web-go/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/ai2web-foundation/ai2web-go.svg)](https://pkg.go.dev/github.com/ai2web-foundation/ai2web-go)
 
