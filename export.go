@@ -1,6 +1,9 @@
 package ai2web
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 // Export adapters (RFC-0015): project the one canonical AI2Web manifest into other wire formats
 // and discovery surfaces. Mirrors @ai2web/core's export.ts.
@@ -110,4 +113,91 @@ func ToAgentJSON(m Manifest) map[string]any {
 			"legal":      m["legal"],
 		},
 	}
+}
+
+// ToOAuthProtectedResource projects the manifest to OAuth 2.0 Protected Resource metadata
+// (RFC 9728), for /.well-known/oauth-protected-resource. MCP clients read this to discover which
+// authorization server guards the resource before starting a flow.
+//
+// Returns nil when the site does not advertise oauth2, so an auth surface the site cannot honour
+// is never published.
+func ToOAuthProtectedResource(m Manifest) map[string]any {
+	auth := toMap(m["auth"])
+	oauth := false
+	for _, v := range toSlice(auth["methods"]) {
+		if toStr(v) == "oauth2" {
+			oauth = true
+			break
+		}
+	}
+	if !oauth {
+		return nil
+	}
+	base := strings.TrimRight(toStr(toMap(m["site"])["url"]), "/")
+	issuer := base
+	o2 := toMap(auth["oauth2"])
+	if authz := toStr(o2["authorization_url"]); authz != "" {
+		if u, err := url.Parse(authz); err == nil && u.Scheme != "" && u.Host != "" {
+			issuer = u.Scheme + "://" + u.Host
+		}
+	}
+	doc := map[string]any{
+		"resource":                 base + "/ai2w",
+		"authorization_servers":    []string{issuer},
+		"bearer_methods_supported": []string{"header"},
+	}
+	if scopes := toSlice(o2["scopes"]); len(scopes) > 0 {
+		out := make([]string, 0, len(scopes))
+		for _, s := range scopes {
+			out = append(out, toStr(s))
+		}
+		doc["scopes_supported"] = out
+	}
+	return doc
+}
+
+// ToContentSignals maps usage_policy onto Content Signals tokens. `search` stays yes because
+// AI2Web exists to be discoverable; the AI signals are only asserted when the manifest states
+// them, so an unset policy is never reported as a refusal. Empty string when no policy exists.
+func ToContentSignals(m Manifest) string {
+	p := toMap(m["usage_policy"])
+	if len(p) == 0 {
+		return ""
+	}
+	signals := []string{"search=yes"}
+	if v, ok := p["content_reproduction"].(bool); ok {
+		signals = append(signals, "ai-input="+yesNo(v))
+	}
+	if v, ok := p["model_training"].(bool); ok {
+		signals = append(signals, "ai-train="+yesNo(v))
+	}
+	return strings.Join(signals, ", ")
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
+}
+
+// ToRobotsTxt returns a robots.txt FRAGMENT carrying the usage policy and a pointer to the
+// manifest. Append it to an existing robots.txt; it is never a replacement and emits no Disallow.
+func ToRobotsTxt(m Manifest) string {
+	base := strings.TrimRight(toStr(toMap(m["site"])["url"]), "/")
+	lines := []string{"# AI2Web usage policy, projected from " + base + "/ai2w", "User-agent: *"}
+	if s := ToContentSignals(m); s != "" {
+		lines = append(lines, "Content-Signal: "+s)
+	}
+	if v, ok := toMap(m["usage_policy"])["bulk_extraction"].(bool); ok && !v {
+		lines = append(lines, "# bulk_extraction: false - please use the /ai2w endpoints instead of crawling")
+	}
+	lines = append(lines, "# AI2Web-Manifest: "+base+"/ai2w")
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// ToDiscoveryLinkHeader is the value for an HTTP Link header advertising the manifest, so
+// non-HTML clients discover it without parsing a page for <link rel="ai2w">.
+func ToDiscoveryLinkHeader(m Manifest) string {
+	return "<" + strings.TrimRight(toStr(toMap(m["site"])["url"]), "/") + "/ai2w>; rel=\"ai2w\""
 }
